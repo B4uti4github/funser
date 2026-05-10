@@ -131,19 +131,71 @@ void js_resumeAudio(js_State *J) { js_playAudioById(J); }
 void render(js_State *J) {
     const char *type = js_tostring(J, 1);
     Color c = WHITE;
+
+    // Tu lógica de color existente (r, g, b, a)
     if (js_isobject(J, 6)) {
         js_getproperty(J, 6, "r"); c.r = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
         js_getproperty(J, 6, "g"); c.g = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
         js_getproperty(J, 6, "b"); c.b = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
         js_getproperty(J, 6, "a"); c.a = js_isdefined(J, -1) ? (unsigned char)js_tonumber(J, -1) : 255; js_pop(J, 1);
     }
-    if (strcmp(type, "rect") == 0) DrawRectangle((int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 2), (int)js_tonumber(J, 5), c);
-    else if (strcmp(type, "text") == 0) DrawText(js_tostring(J, 2), (int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 5), c);
+
+    if (strcmp(type, "rect") == 0) {
+        DrawRectangle((int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 2), (int)js_tonumber(J, 5), c);
+    } 
+    else if (strcmp(type, "text") == 0) {
+        DrawText(js_tostring(J, 2), (int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 5), c);
+    } 
     else if (strcmp(type, "image") == 0) {
         char full[1024]; snprintf(full, 1024, "%s%s", base_path, js_tostring(J, 2));
         Texture2D t = GetCachedTexture(full);
         if (t.id > 0) DrawTexture(t, (int)js_tonumber(J, 3), (int)js_tonumber(J, 4), WHITE);
     }
+    // --- NUEVAS FIGURAS v1.3.5 ---
+    else if (strcmp(type, "circle") == 0) {
+        // render("circle", radio, x, y, 0, color)
+        DrawCircle((int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (float)js_tonumber(J, 2), c);
+    }
+    else if (strcmp(type, "line") == 0) {
+        // render("line", x2, x1, y1, y2, color) -> Reutilizamos los argumentos para x2/y2
+        DrawLine((int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 2), (int)js_tonumber(J, 5), c);
+    }
+    else if (strcmp(type, "pixel") == 0) {
+        DrawPixel((int)js_tonumber(J, 3), (int)js_tonumber(J, 4), c);
+    }
+    else if (strcmp(type, "ellipse") == 0) {
+        // render("ellipse", radiusX, radiusY, x, y, 0, color)
+        DrawEllipse((int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (float)js_tonumber(J, 2), (float)js_tonumber(J, 5), c);
+    }
+    else if (strcmp(type, "ring") == 0) {
+        // render("ring", radioIn, radioOut, x, y, 0, color)
+        DrawRing((Vector2){(int)js_tonumber(J, 3), (int)js_tonumber(J, 4)}, 
+                 (float)js_tonumber(J, 2), (float)js_tonumber(J, 5), 0, 360, 0, c);
+    }
+    else if (strcmp(type, "arc") == 0) {
+        // Argumentos esperados:
+        // 1: "arc", 2: radio, 3: x, 4: y, 5: start, 6: end, 7: color, 8: segments
+        
+        float radius = (float)js_tonumber(J, 2);
+        Vector2 center = {(float)js_tonumber(J, 3), (float)js_tonumber(J, 4)};
+        float startAngle = (float)js_tonumber(J, 5);
+        float endAngle = (float)js_tonumber(J, 6);
+        
+        // Si no mandas segmentos (indice 8), usamos 32 por defecto
+        int segments = js_isdefined(J, 8) ? (int)js_tonumber(J, 8) : 32;
+
+        // El color está en el índice 7
+        Color arcColor = WHITE; 
+        if (js_isobject(J, 7)) { // <--- TODO al índice 7
+            js_getproperty(J, 7, "r"); arcColor.r = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
+            js_getproperty(J, 7, "g"); arcColor.g = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
+            js_getproperty(J, 7, "b"); arcColor.b = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
+            js_getproperty(J, 7, "a"); arcColor.a = js_isdefined(J, -1) ? (unsigned char)js_tonumber(J, -1) : 255; js_pop(J, 1);
+        }
+
+        DrawCircleSector(center, radius, startAngle, endAngle, segments, arcColor);
+    }
+
     js_pushundefined(J);
 }
 

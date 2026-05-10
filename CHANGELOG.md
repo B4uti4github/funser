@@ -1,4 +1,7 @@
 # Changelog
+## 1.3.5
+- More parameters for the draw functions.
+- Better draw in JoyDO.js (Using Draw Call List)
 ## 1.3.0
 - Added Persistent SFX Audio Nodes.
 - Fixed audio looping bug.
