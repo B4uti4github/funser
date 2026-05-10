@@ -1,41 +1,75 @@
 initWindow(800, 600);
-configureStage("Funser Engine Test");
 initAudioSupport();
-
+configureStage("FUNSER 1.3.0 - INFINITE CLICKER GAME");
 require("JoyDO.js");
 
-// Instanciamos el audio una sola vez
-var bounceSound = new AudioInstance("BoopBingBop.wav");
+// Cargamos el sonido una sola vez
+var popSound = new AudioInstance("BoopBingBop.wav");
+var targets = [];
 
-var logo = new DisplayObject("rect");
-logo.width = 120;
-logo.height = 60;
+function spawnTarget() {
+    var t = new DisplayObject("rect");
+    t.x = 50 + Math.random() * 700;
+    t.y = 50 + Math.random() * 500;
+    t.width = 40;
+    t.height = 40;
+    t.color = {
+        r: Math.floor(Math.random() * 255),
+        g: 200,
+        b: 100,
+        a: 255
+    };
+    targets.push(t);
+}
 
-var text = new DisplayObject("text");
-text.text = "FUNSER";
-text.x = 25;
-text.y = 30;
-text.color = { r: 255, g: 255, b: 255, a: 255 };
-
-logo.addChild(text);
-
-var velX = 300;
-var velY = 300;
+// Población inicial
+for (var i = 0; i < 10; i++) spawnTarget();
 
 function onUpdate(dt) {
-    logo.x += velX * dt;
-    logo.y += velY * dt;
+    var mouse = getMousePos();
+    var leftClick = isMousePressed(MOUSE_LEFT);
+    var wheel = getMouseWheel();
 
-    // Rebote con AudioInstance
-    if (logo.x + logo.width >= 800 || logo.x <= 0) {
-        velX *= -1;
-        bounceSound.restart(); // ¡Limpio!
+    if (wheel > 0) {
+        for (var i = 0; i < targets.length; i++) {
+            var obj = targets[i];
+            obj.height += wheel;
+            obj.width += wheel;
+        }
+    } else if (wheel < 0) {
+        for (var i = 0; i < targets.length; i++) {
+            var obj = targets[i];
+            var w = obj.width;
+            var h = obj.height;
+            if (w <= 10 || h <= 10) continue;
+            obj.height += wheel;
+            obj.width += wheel;
+        }
     }
 
-    if (logo.y + logo.height >= 600 || logo.y <= 0) {
-        velY *= -1;
-        bounceSound.restart(); // ¡Limpio!
+    for (var i = targets.length - 1; i >= 0; i--) {
+        var obj = targets[i];
+
+        if (leftClick && obj.isHit(mouse.x, mouse.y)) {
+            // --- RETOQUE PERSISTENTE ---
+            // Si el objeto está arriba, suena agudo. Si está abajo, grave.
+            var pitch = 2.0 - (obj.y / 600) * 1.5;
+            popSound.setPitch(pitch);
+
+            // Panoramización simulada por volumen basado en X
+            var vol = 0.3 + (obj.x / 800) * 0.7;
+            popSound.setVolume(vol);
+
+            popSound.restart(); // Al ser persistente, el cambio es inmediato
+
+            targets.splice(i, 1);
+            spawnTarget();
+            continue;
+        }
+
+        obj.render();
     }
 
-    logo.render();
+    // Dibujar mira
+    render("text", "+", mouse.x - 6, mouse.y - 10, 25, { r: 255, g: 255, b: 255, a: 255 });
 }
