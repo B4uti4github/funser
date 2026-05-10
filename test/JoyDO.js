@@ -1,6 +1,7 @@
 // JoyDO.js
-// v1.0.0
+// v1.1.0 - Added Audio Support
 // An Display Object engine for Funser.
+
 function DisplayObject(type) {
     this.type = type || "rect";
     this.x = 100;
@@ -12,7 +13,6 @@ function DisplayObject(type) {
     this.children = [];
 }
 
-// Métodos vía Prototype
 DisplayObject.prototype.render = function (parentX, parentY) {
     var px = parentX || 0;
     var py = parentY || 0;
@@ -31,9 +31,42 @@ DisplayObject.prototype.draw = function (gx, gy) {
         render("rect", this.width, gx, gy, this.height, this.color);
     } else if (this.type === "text") {
         render("text", this.text, gx, gy, 20, this.color);
+    } else if (this.type === "image") {
+        render("image", this.text, gx, gy, 0, this.color); // Usamos 'text' para el path
     }
 };
 
 DisplayObject.prototype.addChild = function (child) {
     this.children.push(child);
+};
+
+// JoyDO.js - Sección de AudioInstance mejorada contra leaks
+function AudioInstance(path) {
+    this.path = path;
+    this.id = -1;
+}
+
+AudioInstance.prototype.play = function () {
+    // Si ya tenemos un ID, no pedimos uno nuevo a C para no saturar los canales
+    if (this.id !== -1) {
+        this.restart();
+        return this.id;
+    }
+    this.id = playAudio(this.path);
+    return this.id;
+};
+
+AudioInstance.prototype.restart = function () {
+    if (this.id !== -1) {
+        seekAudio(this.id, 0);
+    } else {
+        this.play();
+    }
+};
+
+AudioInstance.prototype.release = function () {
+    if (this.id !== -1) {
+        stopAudio(this.id); // Esta función en C debe llamar a UnloadMusicStream
+        this.id = -1;
+    }
 };

@@ -36,6 +36,5 @@ jobs:
         with:
           files: funser-*-win64.exe
           generate_release_notes: true
-          fail_on_unresolved_object: false # Evita errores si el tag es confuso
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

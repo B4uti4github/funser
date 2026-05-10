@@ -2,203 +2,228 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include "../include/mujs/mujs.h"
 
-// --- VARIABLES DE RUTA ---
+// --- CONFIGURACIÓN DE RUTAS ---
 char base_path[512] = "./";
 
-// Extrae la carpeta del path del script principal (ej: "scripts/main.js" -> "scripts/")
 void set_base_path(const char *main_script_path) {
     const char *last_slash = strrchr(main_script_path, '/');
     if (!last_slash) last_slash = strrchr(main_script_path, '\\');
-
     if (last_slash) {
         int length = last_slash - main_script_path + 1;
-        if (length < 512) {
-            strncpy(base_path, main_script_path, length);
-            base_path[length] = '\0';
-        }
+        strncpy(base_path, main_script_path, (length < 512) ? length : 511);
+        base_path[length] = '\0';
     }
 }
 
-// --- CACHE DE TEXTURAS ---
-typedef struct {
-    char path[256];
-    Texture2D texture;
-} CachedTexture;
-
-CachedTexture cache[100];
-int cacheCount = 0;
+// --- CACHÉ DE TEXTURAS (Para que el dibujo sea rápido) ---
+typedef struct { char path[256]; Texture2D texture; } CachedTexture;
+CachedTexture texCache[100];
+int texCount = 0;
 
 Texture2D GetCachedTexture(const char *path) {
-    for (int i = 0; i < cacheCount; i++) {
-        if (strcmp(cache[i].path, path) == 0) return cache[i].texture;
+    for (int i = 0; i < texCount; i++) {
+        if (strcmp(texCache[i].path, path) == 0) return texCache[i].texture;
     }
-    if (cacheCount < 100) {
+    if (texCount < 100) {
         Texture2D tex = LoadTexture(path);
         if (tex.id > 0) {
-            strncpy(cache[cacheCount].path, path, 255);
-            cache[cacheCount].texture = tex;
-            cacheCount++;
+            strncpy(texCache[texCount].path, path, 255);
+            texCache[texCount].texture = tex;
+            texCount++;
             return tex;
         }
     }
     return (Texture2D){0};
 }
 
-// --- HELPERS ---
+// --- GESTOR DE AUDIO (Tipo FMOD con Streams) ---
+#define MAX_CHANNELS 32
+typedef struct {
+    int id;
+    Music music;
+    bool active;
+} AudioChannel;
+
+AudioChannel channels[MAX_CHANNELS];
+int nextChannelId = 1;
+
+int FindChannelIdx(int id) {
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        if (channels[i].active && channels[i].id == id) return i;
+    }
+    return -1;
+}
+
+// --- HELPERS PARA JS ---
 Color GetColorFromJS(js_State *J, int idx) {
-    Color color = WHITE; 
+    Color c = WHITE;
     if (js_isobject(J, idx)) {
-        js_getproperty(J, idx, "r"); color.r = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
-        js_getproperty(J, idx, "g"); color.g = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
-        js_getproperty(J, idx, "b"); color.b = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
+        js_getproperty(J, idx, "r"); c.r = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
+        js_getproperty(J, idx, "g"); c.g = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
+        js_getproperty(J, idx, "b"); c.b = (unsigned char)js_tonumber(J, -1); js_pop(J, 1);
         js_getproperty(J, idx, "a"); 
-        color.a = js_isdefined(J, -1) ? (unsigned char)js_tonumber(J, -1) : 255;
+        c.a = js_isdefined(J, -1) ? (unsigned char)js_tonumber(J, -1) : 255;
         js_pop(J, 1);
     }
-    return color;
+    return c;
 }
 
-// --- API FUNCTIONS ---
-
-void requirejs(js_State *J) {
-    if (!js_isstring(J, 1)) {
-        js_pushundefined(J);
-        return;
-    }
-
-    const char *filename = js_tostring(J, 1);
-    char full_path[1024];
-
-    // Construye la ruta basada en donde está el script principal
-    snprintf(full_path, sizeof(full_path), "%s%s", base_path, filename);
-
-    if (js_dofile(J, full_path)) {
-        fprintf(stderr, "Require Error: No se pudo cargar '%s' (Buscando en: %s)\n", filename, full_path);
-        js_pop(J, 1);
-    }
-    js_pushundefined(J);
-}
-
-void js_print(js_State *J) {
-    int n = js_gettop(J);
-    for (int i = 1; i < n; i++) {
-        printf("%s%s", js_tostring(J, i), i == n - 1 ? "" : " ");
-    }
-    printf("\n");
-    js_pushundefined(J);
-}
+// --- FUNCIONES API (C <-> JS) ---
 
 void js_initWindow(js_State *J) {
-    int w = (int)js_tonumber(J, 1);
-    int h = (int)js_tonumber(J, 2);
-    if (!IsWindowReady()) {
-        InitWindow(w, h, "Funser Runtime");
-        SetTargetFPS(60);
-    }
+    InitWindow((int)js_tonumber(J, 1), (int)js_tonumber(J, 2), "Funser Engine");
+    SetTargetFPS(60);
     js_pushundefined(J);
 }
 
 void js_configureStage(js_State *J) {
-    if (!IsWindowReady() || js_gettop(J) < 2) {
-        js_pushundefined(J);
-        return;
-    }
-    const char *title = js_tostring(J, 1);
-    SetWindowTitle(title);
+    SetWindowTitle(js_tostring(J, 1));
+    js_pushundefined(J);
+}
+
+void js_initAudio(js_State *J) {
+    if (!IsAudioDeviceReady()) InitAudioDevice();
+    js_pushundefined(J);
+}
+
+void js_playAudio(js_State *J) {
+    const char *path = js_tostring(J, 1);
+    char full_path[1024];
+    snprintf(full_path, sizeof(full_path), "%s%s", base_path, path);
     
-    if (js_gettop(J) >= 3 && js_isstring(J, 2)) {
-        const char *iconPath = js_tostring(J, 2);
-        Image icon = LoadImage(iconPath);
-        if (icon.data != NULL) {
-            SetWindowIcon(icon);
-            UnloadImage(icon);
+    int slot = -1;
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        // Si el canal está inactivo o la música ya terminó de sonar
+        if (!channels[i].active || (channels[i].active && !IsMusicStreamPlaying(channels[i].music))) {
+            slot = i;
+            break;
         }
+    }
+
+    if (slot != -1) {
+        // --- PREVENCIÓN DE LEAK ---
+        // Si el slot estaba activo pero el audio terminó, liberamos la memoria vieja antes de cargar la nueva
+        if (channels[slot].active) {
+            UnloadMusicStream(channels[slot].music);
+        }
+
+        channels[slot].music = LoadMusicStream(full_path);
+        if (channels[slot].music.ctxData != NULL) {
+            PlayMusicStream(channels[slot].music);
+            channels[slot].active = true;
+            channels[slot].id = nextChannelId++;
+            js_pushnumber(J, channels[slot].id);
+        } else {
+            channels[slot].active = false;
+            js_pushnumber(J, -1);
+        }
+    } else {
+        js_pushnumber(J, -1);
+    }
+}
+void js_seekAudio(js_State *J) {
+    int idx = FindChannelIdx((int)js_tonumber(J, 1));
+    if (idx != -1) SeekMusicStream(channels[idx].music, (float)js_tonumber(J, 2));
+    js_pushundefined(J);
+}
+
+void js_stopAudio(js_State *J) {
+    int idx = FindChannelIdx((int)js_tonumber(J, 1));
+    if (idx != -1) {
+        StopMusicStream(channels[idx].music);
+        UnloadMusicStream(channels[idx].music);
+        channels[idx].active = false;
     }
     js_pushundefined(J);
 }
 
 void render(js_State *J) {
-    if (!IsWindowReady() || js_gettop(J) < 2) return; 
     const char *type = js_tostring(J, 1);
-
-    if (strcmp(type, "text") == 0) {
-        DrawText(js_tostring(J, 2), (int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 5), GetColorFromJS(J, 6));
+    if (strcmp(type, "rect") == 0) {
+        DrawRectangle((int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 2), (int)js_tonumber(J, 5), GetColorFromJS(J, 6));
     } 
-    else if (strcmp(type, "rect") == 0) {
-        DrawRectangleV((Vector2){(float)js_tonumber(J, 3), (float)js_tonumber(J, 4)}, 
-                       (Vector2){(float)js_tonumber(J, 2), (float)js_tonumber(J, 5)}, 
-                       GetColorFromJS(J, 6));
+    else if (strcmp(type, "text") == 0) {
+        DrawText(js_tostring(J, 2), (int)js_tonumber(J, 3), (int)js_tonumber(J, 4), (int)js_tonumber(J, 5), GetColorFromJS(J, 6));
     }
     else if (strcmp(type, "image") == 0) {
-        Texture2D tex = GetCachedTexture(js_tostring(J, 2));
-        if (tex.id > 0) {
-            DrawTexture(tex, (int)js_tonumber(J, 3), (int)js_tonumber(J, 4), WHITE);
-        }
+        char full_path[1024];
+        snprintf(full_path, sizeof(full_path), "%s%s", base_path, js_tostring(J, 2));
+        Texture2D tex = GetCachedTexture(full_path);
+        if (tex.id > 0) DrawTexture(tex, (int)js_tonumber(J, 3), (int)js_tonumber(J, 4), WHITE);
     }
     js_pushundefined(J);
 }
 
-// --- MAIN ---
-int main(int argc, char **argv) {
-    if (argc < 2) {
-        printf("Uso: %s <script.js>\n", argv[0]);
-        return 1;
+void requirejs(js_State *J) {
+    char full_path[1024];
+    snprintf(full_path, sizeof(full_path), "%s%s", base_path, js_tostring(J, 1));
+    if (js_dofile(J, full_path)) {
+        fprintf(stderr, "Error en require: %s\n", js_tostring(J, -1));
+        js_pop(J, 1);
     }
+    js_pushundefined(J);
+}
 
-    // Establecer la base para los require relativos
+// --- MAIN LOOP ---
+int main(int argc, char **argv) {
+    if (argc < 2) { printf("Uso: engine <script.js>\n"); return 1; }
     set_base_path(argv[1]);
 
     js_State *J = js_newstate(NULL, NULL, JS_STRICT);
 
     // Registro de funciones globales
-    js_newcfunction(J, render, "render", 6); js_setglobal(J, "render");
     js_newcfunction(J, js_initWindow, "initWindow", 2); js_setglobal(J, "initWindow");
-    js_newcfunction(J, js_configureStage, "configureStage", 2); js_setglobal(J, "configureStage");
+    js_newcfunction(J, js_configureStage, "configureStage", 1); js_setglobal(J, "configureStage");
+    js_newcfunction(J, js_initAudio, "initAudioSupport", 0); js_setglobal(J, "initAudioSupport");
+    js_newcfunction(J, js_playAudio, "playAudio", 1); js_setglobal(J, "playAudio");
+    js_newcfunction(J, js_stopAudio, "stopAudio", 1); js_setglobal(J, "stopAudio");
+    js_newcfunction(J, js_seekAudio, "seekAudio", 2); js_setglobal(J, "seekAudio");
+    js_newcfunction(J, render, "render", 6); js_setglobal(J, "render");
     js_newcfunction(J, requirejs, "require", 1); js_setglobal(J, "require");
-    js_newcfunction(J, js_print, "trace", 1); js_setglobal(J, "trace");
-
-    // Registro de Console API
-    js_newobject(J);
-    js_newcfunction(J, js_print, "log", 1); js_setproperty(J, -2, "log");
-    js_newcfunction(J, js_print, "error", 1); js_setproperty(J, -2, "error");
-    js_setglobal(J, "console");
 
     // Ejecutar script inicial
     if (js_dofile(J, argv[1])) {
-        fprintf(stderr, "JS Error: %s\n", js_tostring(J, -1));
-        js_freestate(J);
+        fprintf(stderr, "Error JS: %s\n", js_tostring(J, -1));
         return 1;
     }
 
-    // Bucle principal
-    while (IsWindowReady() && !WindowShouldClose()) {
-        float dt = GetFrameTime();
+    while (!WindowShouldClose()) {
+        // Actualizar Audio Streams
+        for (int i = 0; i < MAX_CHANNELS; i++) {
+            if (channels[i].active) UpdateMusicStream(channels[i].music);
+        }
+
         BeginDrawing();
-        ClearBackground(RAYWHITE);
+        ClearBackground(BLACK);
 
         js_getglobal(J, "onUpdate");
         if (js_iscallable(J, -1)) {
-            js_pushundefined(J); 
-            js_pushnumber(J, dt);
+            js_pushundefined(J);
+            js_pushnumber(J, GetFrameTime());
             if (js_pcall(J, 1)) {
                 fprintf(stderr, "Runtime Error: %s\n", js_tostring(J, -1));
                 js_pop(J, 1);
-            } else {
-                js_pop(J, 1); 
-            }
-        } else {
-            js_pop(J, 1); 
-        }
+            } else js_pop(J, 1);
+        } else js_pop(J, 1);
 
         EndDrawing();
     }
 
-    // Limpieza
-    for (int i = 0; i < cacheCount; i++) UnloadTexture(cache[i].texture);
+    // --- LIMPIEZA ---
+    for (int i = 0; i < texCount; i++) UnloadTexture(texCache[i].texture);
+    // Al salir del while(!WindowShouldClose())
+    for (int i = 0; i < MAX_CHANNELS; i++) {
+        if (channels[i].active) {
+            StopMusicStream(channels[i].music);
+            UnloadMusicStream(channels[i].music); // <--- Esto libera la RAM del buffer
+        }
+    }
+    if (IsAudioDeviceReady()) CloseAudioDevice();
+    CloseWindow();
     js_freestate(J);
-    if (IsWindowReady()) CloseWindow();
-    
+
     return 0;
 }

@@ -1,60 +1,54 @@
 # Funser
 An JS Runtime for 2D Games. Powered by mujs and raylib. Written in C.
 
+It is 500x more lighter than NodeJS. It is not a framework, it is a runtime.
+
 ## Examples:
 Run this script with funser.exe test/test1.js 
 
 Example 1:
 test1.js (it needs JoyDO.js):
 ```javascript
-// 1. Inicializamos la ventana primero (Requerido por main.c)
 initWindow(800, 600);
-
-// 2. Configuramos el Stage (Título e icono opcional)
 configureStage("Funser Engine Test");
+initAudioSupport();
 
 require("JoyDO.js");
 
-// --- Instancias ---
-var logoContainer = new DisplayObject("rect");
-var texto = new DisplayObject("text");
-texto.text = "FUNSER";
-texto.x = 25;
-texto.y = 30;
-texto.color = { r: 255, g: 255, b: 255, a: 255 };
+// Instanciamos el audio una sola vez
+var bounceSound = new AudioInstance("BoopBingBop.wav");
 
-logoContainer.addChild(texto);
+var logo = new DisplayObject("rect");
+logo.width = 120;
+logo.height = 60;
 
-// --- Lógica de movimiento ---
-var velX = 220;
-var velY = 220;
+var text = new DisplayObject("text");
+text.text = "FUNSER";
+text.x = 25;
+text.y = 30;
+text.color = { r: 255, g: 255, b: 255, a: 255 };
 
-function changeColor(obj) {
-    obj.color.r = Math.floor(Math.random() * 255);
-    obj.color.g = Math.floor(Math.random() * 255);
-    obj.color.b = Math.floor(Math.random() * 255);
-}
+logo.addChild(text);
 
-// Función global para que C la encuentre
+var velX = 300;
+var velY = 300;
+
 function onUpdate(dt) {
-    // 1. Movimiento
-    logoContainer.x = logoContainer.x + (velX * dt);
-    logoContainer.y = logoContainer.y + (velY * dt);
+    logo.x += velX * dt;
+    logo.y += velY * dt;
 
-    // 2. Rebote X
-    if (logoContainer.x + logoContainer.width >= 800 || logoContainer.x <= 0) {
-        velX = velX * -1;
-        changeColor(logoContainer);
+    // Rebote con AudioInstance
+    if (logo.x + logo.width >= 800 || logo.x <= 0) {
+        velX *= -1;
+        bounceSound.restart(); // ¡Limpio!
     }
 
-    // 3. Rebote Y
-    if (logoContainer.y + logoContainer.height >= 600 || logoContainer.y <= 0) {
-        velY = velY * -1;
-        changeColor(logoContainer);
+    if (logo.y + logo.height >= 600 || logo.y <= 0) {
+        velY *= -1;
+        bounceSound.restart(); // ¡Limpio!
     }
 
-    // 4. Dibujo
-    logoContainer.render();
+    logo.render();
 }
 ```
 
