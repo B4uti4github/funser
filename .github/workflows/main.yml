@@ -1,0 +1,38 @@
+name: Build and Release Funser
+
+on:
+  push:
+    tags:
+      - 'v*' # Se activa cuando subes un tag como v1.0.0
+
+permissions:
+  contents: write # Crucial para que la Action pueda crear el Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar MinGW x64
+        uses: egor-tensin/setup-mingw@v3
+        with:
+          platform: x64
+
+      - name: Compilar
+        run: |
+          gcc src/main.c include/mujs/one.c "include/raylib/raylib-6.0_win64_mingw-w64/lib/libraylib.a" -o funser.exe -I"include/raylib/raylib-6.0_win64_mingw-w64/include" -I"include/mujs" -lopengl32 -lgdi32 -lwinmm
+
+      - name: Preparar nombre del archivo
+        # Esto cambia el nombre a algo como: funser-v1.0.0-win64.exe
+        run: |
+          mv funser.exe funser-${{ github.ref_name }}-win64.exe
+
+      - name: Subir a GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: funser-*.exe # Sube cualquier archivo que empiece con funser- y termine en .exe
+          generate_release_notes: true # Crea automáticamente la lista de cambios
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

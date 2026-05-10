@@ -4,6 +4,23 @@
 #include <stdlib.h>
 #include "../include/mujs/mujs.h"
 
+// --- VARIABLES DE RUTA ---
+char base_path[512] = "./";
+
+// Extrae la carpeta del path del script principal (ej: "scripts/main.js" -> "scripts/")
+void set_base_path(const char *main_script_path) {
+    const char *last_slash = strrchr(main_script_path, '/');
+    if (!last_slash) last_slash = strrchr(main_script_path, '\\');
+
+    if (last_slash) {
+        int length = last_slash - main_script_path + 1;
+        if (length < 512) {
+            strncpy(base_path, main_script_path, length);
+            base_path[length] = '\0';
+        }
+    }
+}
+
 // --- CACHE DE TEXTURAS ---
 typedef struct {
     char path[256];
@@ -20,7 +37,7 @@ Texture2D GetCachedTexture(const char *path) {
     if (cacheCount < 100) {
         Texture2D tex = LoadTexture(path);
         if (tex.id > 0) {
-            strcpy(cache[cacheCount].path, path);
+            strncpy(cache[cacheCount].path, path, 255);
             cache[cacheCount].texture = tex;
             cacheCount++;
             return tex;
@@ -43,7 +60,27 @@ Color GetColorFromJS(js_State *J, int idx) {
     return color;
 }
 
-// --- API DE CONSOLA ---
+// --- API FUNCTIONS ---
+
+void requirejs(js_State *J) {
+    if (!js_isstring(J, 1)) {
+        js_pushundefined(J);
+        return;
+    }
+
+    const char *filename = js_tostring(J, 1);
+    char full_path[1024];
+
+    // Construye la ruta basada en donde está el script principal
+    snprintf(full_path, sizeof(full_path), "%s%s", base_path, filename);
+
+    if (js_dofile(J, full_path)) {
+        fprintf(stderr, "Require Error: No se pudo cargar '%s' (Buscando en: %s)\n", filename, full_path);
+        js_pop(J, 1);
+    }
+    js_pushundefined(J);
+}
+
 void js_print(js_State *J) {
     int n = js_gettop(J);
     for (int i = 1; i < n; i++) {
@@ -53,13 +90,9 @@ void js_print(js_State *J) {
     js_pushundefined(J);
 }
 
-// --- API DE WINDOW / STAGE ---
-
-// initWindow(width, height)
 void js_initWindow(js_State *J) {
     int w = (int)js_tonumber(J, 1);
     int h = (int)js_tonumber(J, 2);
-    
     if (!IsWindowReady()) {
         InitWindow(w, h, "Funser Runtime");
         SetTargetFPS(60);
@@ -67,40 +100,25 @@ void js_initWindow(js_State *J) {
     js_pushundefined(J);
 }
 
-// configureStage(title, iconPath [opcional])
 void js_configureStage(js_State *J) {
-    // Verificamos si la ventana existe ANTES de hacer nada
-    if (!IsWindowReady()) {
-        // Si no hay ventana, ignoramos la configuración silenciosamente
-        // o podrías imprimir un warning para el desarrollador:
-        // printf("Warning: configureStage ignorado. Llama primero a initWindow().\n");
+    if (!IsWindowReady() || js_gettop(J) < 2) {
         js_pushundefined(J);
         return;
     }
-
-    if (js_gettop(J) < 1) return;
-
     const char *title = js_tostring(J, 1);
-    const char *iconPath = NULL;
-    
-    if (js_gettop(J) >= 2 && js_isstring(J, 2)) {
-        iconPath = js_tostring(J, 2);
-    }
-
     SetWindowTitle(title);
     
-    if (iconPath && strlen(iconPath) > 0) {
+    if (js_gettop(J) >= 3 && js_isstring(J, 2)) {
+        const char *iconPath = js_tostring(J, 2);
         Image icon = LoadImage(iconPath);
         if (icon.data != NULL) {
             SetWindowIcon(icon);
             UnloadImage(icon);
         }
     }
-    
     js_pushundefined(J);
 }
 
-// --- MOTOR DE RENDER ---
 void render(js_State *J) {
     if (!IsWindowReady() || js_gettop(J) < 2) return; 
     const char *type = js_tostring(J, 1);
@@ -129,21 +147,25 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    // Establecer la base para los require relativos
+    set_base_path(argv[1]);
+
     js_State *J = js_newstate(NULL, NULL, JS_STRICT);
 
-    // Registro de funciones
+    // Registro de funciones globales
     js_newcfunction(J, render, "render", 6); js_setglobal(J, "render");
     js_newcfunction(J, js_initWindow, "initWindow", 2); js_setglobal(J, "initWindow");
     js_newcfunction(J, js_configureStage, "configureStage", 2); js_setglobal(J, "configureStage");
-    
-    // Console API
+    js_newcfunction(J, requirejs, "require", 1); js_setglobal(J, "require");
+    js_newcfunction(J, js_print, "trace", 1); js_setglobal(J, "trace");
+
+    // Registro de Console API
     js_newobject(J);
     js_newcfunction(J, js_print, "log", 1); js_setproperty(J, -2, "log");
     js_newcfunction(J, js_print, "error", 1); js_setproperty(J, -2, "error");
     js_setglobal(J, "console");
-    js_newcfunction(J, js_print, "trace", 1); js_setglobal(J, "trace");
 
-    // Ejecutar script
+    // Ejecutar script inicial
     if (js_dofile(J, argv[1])) {
         fprintf(stderr, "JS Error: %s\n", js_tostring(J, -1));
         js_freestate(J);
@@ -158,22 +180,22 @@ int main(int argc, char **argv) {
 
         js_getglobal(J, "onUpdate");
         if (js_iscallable(J, -1)) {
-            js_pushundefined(J);
+            js_pushundefined(J); 
             js_pushnumber(J, dt);
             if (js_pcall(J, 1)) {
                 fprintf(stderr, "Runtime Error: %s\n", js_tostring(J, -1));
                 js_pop(J, 1);
             } else {
-                js_pop(J, 1);
+                js_pop(J, 1); 
             }
         } else {
-            js_pop(J, 1);
+            js_pop(J, 1); 
         }
 
         EndDrawing();
     }
 
-    // Limpieza final
+    // Limpieza
     for (int i = 0; i < cacheCount; i++) UnloadTexture(cache[i].texture);
     js_freestate(J);
     if (IsWindowReady()) CloseWindow();
