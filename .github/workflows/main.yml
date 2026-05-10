@@ -3,10 +3,11 @@ name: Build and Release Funser
 on:
   push:
     tags:
-      - 'v*' # Se activa cuando subes un tag como v1.0.0
+      - 'v*' # Se activa al subir un tag (ej. v1.0.0)
+  workflow_dispatch: # ESTO ACTIVA EL BOTÓN PARA LANZARLO MANUALMENTE
 
 permissions:
-  contents: write # Crucial para que la Action pueda crear el Release
+  contents: write
 
 jobs:
   build:
@@ -25,14 +26,16 @@ jobs:
           gcc src/main.c include/mujs/one.c "include/raylib/raylib-6.0_win64_mingw-w64/lib/libraylib.a" -o funser.exe -I"include/raylib/raylib-6.0_win64_mingw-w64/include" -I"include/mujs" -lopengl32 -lgdi32 -lwinmm
 
       - name: Preparar nombre del archivo
-        # Esto cambia el nombre a algo como: funser-v1.0.0-win64.exe
+        shell: bash
         run: |
-          mv funser.exe funser-${{ github.ref_name }}-win64.exe
+          # Si se lanza manualmente, github.ref_name será 'main', si es por tag será 'v1.0.0'
+          mv funser.exe "funser-${{ github.ref_name }}-win64.exe"
 
       - name: Subir a GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          files: funser-*.exe # Sube cualquier archivo que empiece con funser- y termine en .exe
-          generate_release_notes: true # Crea automáticamente la lista de cambios
+          files: funser-*-win64.exe
+          generate_release_notes: true
+          fail_on_unresolved_object: false # Evita errores si el tag es confuso
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
